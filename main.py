@@ -167,7 +167,7 @@ class Geoguessr(commands.Cog):
         await channel.send(embed=embed)
 
     @tasks.loop(
-        time=datetime.time(hour=5, minute=15, second=10, tzinfo=tzinfo),
+        time=datetime.time(hour=0, minute=0, second=0, tzinfo=tzinfo),
         reconnect=False,
     )
     async def daily_challenge_task(self) -> None:
