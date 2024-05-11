@@ -5,11 +5,12 @@ import datetime
 import json
 import logging
 import os
+import pathlib
 import random
 import typing
+from zoneinfo import ZoneInfo
 
 import aiohttp
-import pathlib
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright, BrowserContext, Browser, Playwright
 
@@ -20,7 +21,11 @@ from discord.ext import commands, tasks
 load_dotenv()
 discord.utils.setup_logging()
 logger = logging.getLogger()
-tzinfo = datetime.datetime.now(datetime.timezone.utc).astimezone().tzinfo
+
+if "TIMEZONE" in os.environ:
+    tzinfo = ZoneInfo(os.environ["TIMEZONE"])
+else:
+    tzinfo = datetime.datetime.now(datetime.timezone.utc).astimezone().tzinfo
 
 # Set to True to sync the commands tree with the Discord API.
 SYNCING_TREE = False
