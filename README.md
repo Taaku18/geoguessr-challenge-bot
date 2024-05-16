@@ -21,9 +21,14 @@ Pre-requisites: `docker`. Without Docker works too, but you will need to figure 
     DISCORD_BOT_TOKEN=XXX
     GEOGUESSR_EMAIL=your@email.com
     GEOGUESSR_PASSWORD=password
+    GEOGUESSR_AUTO_EMAIL=your.auto@email.com
+    GEOGUESSR_AUTO_PASSWORD=auto.password
+    GEOGUESSR_AUTO_USERNAME=auto-username
     AUTHORIZED_GUILDS=12345,12345
     ```
    If you want to make the bot public, you can remove the `AUTHORIZED_GUILDS` variable.
+   If you do not wish to use a dedicated auto-guessing account (doesn't need PRO subscription), you can set `GEOGUESSR_AUTO_EMAIL`, `GEOGUESSR_AUTO_PASSWORD`, and `GEOGUESSR_AUTO_USERNAME` to your main account's details as well. Be aware that your main account's stats will be negatively affected.
+
 3. Build the Docker image:
     ```bash
     docker build -t geoguessr-challenge-bot .

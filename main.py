@@ -30,8 +30,9 @@ else:
 # Set to True to sync the commands tree with the Discord API.
 SYNCING_TREE = False
 
-COOKIE_DUMP_PATH = pathlib.Path(__file__).absolute().parent / "data" / ".cookies"
-COOKIE_DUMP_PATH.parent.mkdir(exist_ok=True)
+MAIN_COOKIE_DUMP_PATH = pathlib.Path(__file__).absolute().parent / "data" / ".main.cookies"
+AUTO_COOKIE_DUMP_PATH = pathlib.Path(__file__).absolute().parent / "data" / ".auto.cookies"
+MAIN_COOKIE_DUMP_PATH.parent.mkdir(exist_ok=True)
 
 CONFIG_PATH = pathlib.Path(__file__).absolute().parent / "data" / "config.json"
 CONFIG_PATH.parent.mkdir(exist_ok=True)
@@ -54,15 +55,20 @@ class Geoguessr(commands.Cog):
         self.bot = bot
         self.playwright: Playwright | None = None
         self.browser: Browser | None = None
-        self.context: BrowserContext | None = None
-        self.aiohttp_session: aiohttp.ClientSession | None = None
+        self.main_context: BrowserContext | None = None
+        self.auto_context: BrowserContext | None = None
         self.config_lock = asyncio.Lock()
 
         # Load saved cookies.
-        self.saved_cookies: str = ""
-        if COOKIE_DUMP_PATH.exists():
-            with COOKIE_DUMP_PATH.open("r") as f:
-                self.saved_cookies = f.read()
+        self.main_saved_cookies: dict[str, str] = {}
+        if MAIN_COOKIE_DUMP_PATH.exists():
+            with MAIN_COOKIE_DUMP_PATH.open("r") as f:
+                self.main_saved_cookies = json.load(f)
+
+        self.auto_saved_cookies: dict[str, str] = {}
+        if AUTO_COOKIE_DUMP_PATH.exists():
+            with AUTO_COOKIE_DUMP_PATH.open("r") as f:
+                self.auto_saved_cookies = json.load(f)
 
         self.all_maps_data: dict[str, dict[str, str]] = {}  # Format: {slug: {name: name, countryCode: countryCode}}
 
@@ -70,20 +76,32 @@ class Geoguessr(commands.Cog):
         """
         Callback for when the Geoguessr cog loads.
         """
-        self.aiohttp_session = aiohttp.ClientSession()
         self.playwright = await async_playwright().start()
         self.browser = await self.playwright.chromium.launch(headless=True)
-        self.context = await self.browser.new_context(
+
+        self.main_context = await self.browser.new_context(
             viewport={"width": 1920, "height": 1080},
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         )
-        await self.context.set_extra_http_headers(
+        await self.main_context.set_extra_http_headers(
             {"Accept-Language": "en-US,en;q=0.9", "Accept-Encoding": "gzip, deflate, br"}
         )
+        self.auto_context = await self.browser.new_context(
+            viewport={"width": 1920, "height": 1080},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        )
+        await self.auto_context.set_extra_http_headers(
+            {"Accept-Language": "en-US,en;q=0.9", "Accept-Encoding": "gzip, deflate, br"}
+        )
+
         # Get Geoguessr cookies if not already saved.
-        if not self.saved_cookies:
-            await self.get_geoguessr_cookies()
+        if not self.main_saved_cookies:
+            await self.get_geoguessr_cookies("main")
+
+        if not self.auto_saved_cookies:
+            await self.get_geoguessr_cookies("auto")
 
         await self._load_map_data()
         self.load_map_data.start()
@@ -97,11 +115,11 @@ class Geoguessr(commands.Cog):
         self.load_map_data.stop()
         self.daily_challenge_task.cancel()
         self.daily_challenge_task.stop()
-        await self.aiohttp_session.close()
-        await self.context.close()
+        await self.main_context.close()
+        await self.auto_context.close()
         await self.browser.close()
         await self.playwright.stop()
-        self.context = self.browser = self.playwright = None
+        self.main_context = self.auto_context = self.browser = self.playwright = None
 
     async def _load_map_data(self) -> None:
         """
@@ -109,13 +127,15 @@ class Geoguessr(commands.Cog):
         """
         # Load all maps data.
         try:
-            for _ in range(2):  # Try twice in case of Unauthorized error
-                async with aiohttp.ClientSession() as session:
+            for repeat_c in range(2):  # Try twice in case of Unauthorized error
+                async with aiohttp.ClientSession(cookies=self.main_saved_cookies) as session:
                     async with session.get("https://www.geoguessr.com/api/maps/explorer") as response:
-                        if response.status == 401:
-                            self.saved_cookies = ""
-                            await self.get_geoguessr_cookies()
+                        if response.status == 401 and repeat_c == 0:
+                            self.main_saved_cookies = {}
+                            await self.get_geoguessr_cookies("main")
                             continue
+
+                        response.raise_for_status()
 
                         data = await response.json()
                         self.all_maps_data = {
@@ -134,7 +154,22 @@ class Geoguessr(commands.Cog):
         await asyncio.sleep(random.randint(0, 600))  # Random delay of up to 10 minutes to avoid rate limiting.
         await self._load_map_data()
 
-    async def _send_daily_challenge(self, guild: discord.Guild) -> None:
+    @staticmethod
+    def _get_daily_embed(link: str) -> discord.Embed:
+        date = datetime.datetime.now(tz=tzinfo).strftime("%B %d %Y")
+        short_link = link.replace("https://", "")
+        embed = discord.Embed(
+            title=f"Daily Geoguessr Challenge",
+            description=f"Here is the link to today's Geoguessr challenge:\n[{short_link}]({link})",
+            colour=discord.Colour.from_rgb(167, 199, 231),
+        )
+
+        embed.set_author(name=date, url=link)
+
+        embed.set_footer(text=f"Use of external help is not allowed (e.g. Google) · Good luck!")
+        return embed
+
+    async def _send_daily_challenge(self, guild: discord.Guild, *, send_leaderboard: bool = False) -> None:
         """
         Send the daily Geoguessr challenge for the specified guild.
 
@@ -153,22 +188,30 @@ class Geoguessr(commands.Cog):
         if link is None:
             return
 
-        date = datetime.datetime.now(tz=tzinfo).strftime("%B %d %Y")
-        embed = discord.Embed(
-            title=f"Daily Geoguessr Challenge",
-            description=f"Here is the link to today's Geoguessr challenge:\n{link}",
-            colour=discord.Colour.from_rgb(167, 199, 231)
-        )
+        embed = self._get_daily_embed(link)
 
-        embed.set_author(name=date, url=link)
+        if send_leaderboard:
+            # Add yesterday's leaderboard.
+            yesterday = datetime.datetime.now(tz=tzinfo) - datetime.timedelta(days=1)
+            leaderboard = await self.get_game_results(guild.id, yesterday.strftime("%Y-%m-%d"))
+            if leaderboard is not None:
+                if not leaderboard:
+                    embed.add_field(
+                        name=f"Yesterday's Top Players",
+                        value="No one played yesterday.",
+                        inline=False,
+                    )
+                else:
+                    embed.add_field(
+                        name=f"Yesterday's Top Players",
+                        value="\n".join(
+                            f"{i + 1}. **[{entry['username']}](https://www.geoguessr.com/user/{entry['user_id']})** "
+                            f"- {entry['score']} points"
+                            for i, entry in enumerate(leaderboard[:10])
+                        ),
+                        inline=False,
+                    )
 
-        map_name = daily_config["map_name"]
-        if map_name in {"world", "famous-places"}:
-            proper_name = map_name.title().replace("-", " ")
-        else:
-            proper_name = self.all_maps_data[map_name]["name"]
-
-        embed.set_footer(text=f"Map: {proper_name} · Good luck!")
         await channel.send(embed=embed)
 
     @tasks.loop(
@@ -181,7 +224,7 @@ class Geoguessr(commands.Cog):
         """
         logger.info("Sending daily Geoguessr challenges.")
         for guild in self.bot.guilds:
-            await self._send_daily_challenge(guild)
+            await self._send_daily_challenge(guild, send_leaderboard=True)
 
     async def get_daily_config(self, guild_id: int) -> dict[str, typing.Any] | None:
         """
@@ -262,7 +305,7 @@ class Geoguessr(commands.Cog):
                 config = json.load(f)
             if str(guild_id) in config and "daily_links" in config[str(guild_id)]:
                 daily_link = config[str(guild_id)]["daily_links"].get(
-                    str(datetime.datetime.now(tz=tzinfo).date()), None
+                    datetime.datetime.now(tz=tzinfo).strftime("%Y-%m-%d"), None
                 )
             else:
                 daily_link = None
@@ -278,6 +321,7 @@ class Geoguessr(commands.Cog):
                 daily_config["no_move"],
                 daily_config["no_pan"],
                 daily_config["no_zoom"],
+                auto_guess=True,
             )
             if daily_link is None:
                 logger.error("Failed to get Geoguessr challenge link.")
@@ -291,7 +335,7 @@ class Geoguessr(commands.Cog):
                     config[str(guild_id)] = {}
                 if "daily_links" not in config[str(guild_id)]:
                     config[str(guild_id)]["daily_links"] = {}
-                config[str(guild_id)]["daily_links"][str(datetime.datetime.now(tz=tzinfo).date())] = daily_link
+                config[str(guild_id)]["daily_links"][datetime.datetime.now(tz=tzinfo).strftime("%Y-%m-%d")] = daily_link
                 with CONFIG_PATH.open("w") as f:
                     json.dump(config, f, indent=4)
 
@@ -303,18 +347,18 @@ class Geoguessr(commands.Cog):
         Get the headers to use for requests to Geoguessr.
         """
         return {
-            "Cookie": self.saved_cookies,
             "Referer": "https://www.geoguessr.com/",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         }
 
-    async def get_geoguessr_cookies(self) -> None:
+    async def get_geoguessr_cookies(self, type_: typing.Literal["main", "auto"], /) -> None:
         """
         Get the cookies required to access Geoguessr.
         """
-        logging.info("Getting Geoguessr cookies")
-        page = await self.context.new_page()
+        logging.info("Getting Geoguessr cookies for %s.", type_)
+        context = self.main_context if type_ == "main" else self.auto_context
+        page = await context.new_page()
 
         # Navigate to geoguessr.com.
         await page.goto("https://www.geoguessr.com")
@@ -326,9 +370,16 @@ class Geoguessr(commands.Cog):
             await page.goto("https://www.geoguessr.com/signin")
             await asyncio.sleep(1)
 
+            if type_ == "main":
+                email = os.environ["GEOGUESSR_EMAIL"]
+                password = os.environ["GEOGUESSR_PASSWORD"]
+            else:
+                email = os.environ["GEOGUESSR_AUTO_EMAIL"]
+                password = os.environ["GEOGUESSR_AUTO_PASSWORD"]
+
             # Find the email and password input fields and fill them and submit the form.
-            await page.fill('input[type="email"]', os.environ["GEOGUESSR_EMAIL"])
-            await page.fill('input[type="password"]', os.environ["GEOGUESSR_PASSWORD"])
+            await page.fill('input[type="email"]', email)
+            await page.fill('input[type="password"]', password)
             await page.click('button[type="submit"]')
 
             # Wait for navigation to complete after login.
@@ -340,10 +391,16 @@ class Geoguessr(commands.Cog):
         await page.close()
 
         # Save the cookies.
-        cookies = {cookie["name"]: cookie["value"] for cookie in await self.context.cookies()}
-        self.saved_cookies = "; ".join(f"{name}={value}" for name, value in cookies.items())
-        with COOKIE_DUMP_PATH.open("w") as f:
-            f.write(self.saved_cookies)
+        cookies = {cookie["name"]: cookie["value"] for cookie in await context.cookies()}
+
+        if type_ == "main":
+            self.main_saved_cookies = cookies
+            with MAIN_COOKIE_DUMP_PATH.open("w") as f:
+                json.dump(cookies, f)
+        else:
+            self.auto_saved_cookies = cookies
+            with AUTO_COOKIE_DUMP_PATH.open("w") as f:
+                json.dump(cookies, f)
 
     async def get_geoguessr_challenge_link(
         self,
@@ -352,6 +409,8 @@ class Geoguessr(commands.Cog):
         no_move: bool = False,
         no_pan: bool = False,
         no_zoom: bool = False,
+        *,
+        auto_guess: bool = False,
     ) -> str | None:
         """
         Get a Geoguessr challenge link with the specified settings.
@@ -361,12 +420,22 @@ class Geoguessr(commands.Cog):
         :param no_move: Whether to forbid moving.
         :param no_pan: Whether to forbid rotating.
         :param no_zoom: Whether to forbid zooming.
+        :param auto_guess: Whether to automatically guess the location (for daily's).
         :return: The Geoguessr challenge link. None if an error occurred.
         """
 
+        logger.info(
+            "Getting Geoguessr challenge link with options: %s, %s, %s, %s, %s",
+            map_name,
+            time_limit,
+            no_move,
+            no_pan,
+            no_zoom,
+        )
+
         # Get Geoguessr cookies if not already saved.
-        if not self.saved_cookies:
-            await self.get_geoguessr_cookies()
+        if not self.main_saved_cookies:
+            await self.get_geoguessr_cookies("main")
 
         data = {
             "map": map_name,
@@ -377,30 +446,165 @@ class Geoguessr(commands.Cog):
         }
 
         try:
-            for _ in range(2):  # Try twice in case of Unauthorized error
+            for repeat_c in range(2):  # Try twice in case of Unauthorized error
                 # Send POST request with specific cookies in the header using aiohttp
-                async with aiohttp.ClientSession() as session:
+                async with aiohttp.ClientSession(cookies=self.main_saved_cookies) as session:
                     url = "https://www.geoguessr.com/api/v3/challenges"
                     async with session.post(url, headers=self.headers, json=data) as response:
-                        if response.status == 401:  # Unauthorized
-                            self.saved_cookies = ""
-                            await self.get_geoguessr_cookies()
+                        if response.status == 401 and repeat_c == 0:  # Unauthorized
+                            self.main_saved_cookies = {}
+                            await self.get_geoguessr_cookies("main")
                             continue
 
                         if response.status == 500:
                             logger.info("Failed to get Geoguessr challenge link: invalid options. %s", data)
                             return None
 
+                        response.raise_for_status()
+
                         resp = await response.json()
                         token = resp["token"]
-                        response.raise_for_status()
                 break
 
         except Exception:
             logger.exception("Failed to get Geoguessr challenge link.", exc_info=True)
             return None
 
+        if auto_guess:
+            # noinspection PyAsyncCall
+            asyncio.create_task(self.auto_guess(token))
+
         return f"https://www.geoguessr.com/challenge/{token}"
+
+    async def auto_guess(self, token: str) -> None:
+        """
+        Automatically guess the location in the Geoguessr challenge (in Antarctica).
+        :param token: The token of the challenge.
+        """
+
+        logger.info("Automatically guessing the location in the Geoguessr challenge.")
+        try:
+            for repeat_c in range(2):  # Try twice in case of Unauthorized error
+                # Send POST request with specific cookies in the header using aiohttp
+                async with aiohttp.ClientSession(cookies=self.auto_saved_cookies) as session:
+                    url = f"https://www.geoguessr.com/api/v3/challenges/{token}"
+                    async with session.post(url, headers=self.headers, json={}) as response:
+                        if response.status == 401 and repeat_c == 0:  # Unauthorized
+                            self.auto_saved_cookies = {}
+                            await self.get_geoguessr_cookies("auto")
+                            continue
+
+                        response.raise_for_status()
+
+                        resp = await response.json()
+                        round_token: str = resp["token"]
+
+                    state: typing.Literal["started", "finished"] = "started"
+
+                    while state != "finished":
+                        await asyncio.sleep(random.uniform(0, 1))
+
+                        # Add a random offset to avoid detection.
+                        data = {"lat": -83 + random.uniform(0, 0.3), "lng": random.uniform(-0.8, 0.8)}
+
+                        url = "https://www.geoguessr.com/api/v4/geo-coding/terrain"
+                        async with session.post(url, headers=self.headers, json=data) as response:
+                            response.raise_for_status()
+
+                        data["token"] = round_token
+                        data["timedOut"] = False
+
+                        url = f"https://www.geoguessr.com/api/v3/games/{round_token}"
+                        async with session.post(url, headers=self.headers, json=data) as response:
+                            response.raise_for_status()
+
+                        await asyncio.sleep(random.uniform(0, 1))
+
+                        async with session.get(url, headers=self.headers, params={"client": "web"}) as response:
+                            state = (await response.json())["state"]
+                break
+
+        except Exception:
+            logger.exception("Failed to get Geoguessr challenge link.", exc_info=True)
+            return
+
+        logger.info("Successfully guessed the location in the Geoguessr challenge.")
+
+    async def get_game_results(self, guild_id: int, date: str) -> list[dict[str, typing.Any]] | None:
+        """
+        Get the daily geoguessr results for the specified date.
+
+        :param guild_id: The ID of the guild.
+        :param date: The date of the leaderboard (YYYY-MM-DD).
+        :return: The results. None if an error occurred or the results doesn't exist.
+        """
+
+        async with self.config_lock:
+            with CONFIG_PATH.open("r") as f:
+                config = json.load(f)
+
+        # If the guild never set up daily challenges.
+        if str(guild_id) not in config or "daily_links" not in config[str(guild_id)]:
+            return None
+
+        # If the guild set up daily challenges but the date is not in the daily_links.
+        if date not in config[str(guild_id)]["daily_links"]:
+            return None
+
+        token = config[str(guild_id)]["daily_links"][date].rsplit("/", maxsplit=1)[-1]
+        url = f"https://www.geoguessr.com/api/v3/results/highscores/{token}"
+        try:
+            for repeat_c in range(3):  # Try twice in case of Unauthorized error
+                async with aiohttp.ClientSession(cookies=self.auto_saved_cookies) as session:
+                    # TODO: May need to handle pagination.
+                    async with session.get(
+                        url, headers=self.headers, params={"friends": "false", "limit": 9999, "minRounds": 5}
+                    ) as response:
+
+                        if response.status == 401:
+                            if repeat_c == 0:
+                                self.auto_saved_cookies = {}
+                                await self.get_geoguessr_cookies("auto")
+                                continue
+                            elif repeat_c == 1:  # The bot hasn't guessed yet
+                                await self.auto_guess(token)
+                                continue
+
+                        response.raise_for_status()
+
+                        data = await response.json()
+                break
+
+            results = []
+            for entry in data["items"]:
+                if entry["playerName"] == os.environ["GEOGUESSR_AUTO_USERNAME"]:
+                    continue  # Skip the bot's entry
+
+                rounds = []
+                for round_ in entry["game"]["player"]["guesses"]:
+                    rounds.append(
+                        {
+                            "distance": round_["distanceInMeters"],
+                            "score": round_["roundScore"]["amount"],
+                        }
+                    )
+
+                results.append(
+                    {
+                        "username": entry["playerName"],
+                        "user_id": entry["userId"],
+                        "score": entry["game"]["player"]["totalScore"]["amount"],
+                        "distance": entry["game"]["player"]["totalDistanceInMeters"],
+                        "rounds": rounds,
+                    }
+                )
+            results.sort(key=lambda x: int(x["score"]), reverse=True)
+
+        except Exception:
+            logger.exception("Failed to get Geoguessr leaderboard.", exc_info=True)
+            return None
+
+        return results
 
     # noinspection PyUnusedLocal
     async def map_name_autocomplete(
@@ -575,14 +779,37 @@ class Geoguessr(commands.Cog):
     @commands.hybrid_command()
     async def geodaily(self, ctx: commands.Context) -> None:
         """
-        Get the link to the daily Geoguessr challenge.
+        Shows the daily Geoguessr challenge.
         """
+        await ctx.defer()
         link = await self.get_daily_link(ctx.guild.id)
         if link is None:
             await ctx.reply("Daily Geoguessr challenge is not set up.", ephemeral=True)
             return
 
-        await ctx.reply(f"Here is the link to today's daily Geoguessr challenge:\n{link}")
+        embed = self._get_daily_embed(link)
+
+        leaderboard = await self.get_game_results(ctx.guild.id, datetime.datetime.now(tz=tzinfo).strftime("%Y-%m-%d"))
+        if leaderboard is not None:
+            if not leaderboard:
+                embed.add_field(
+                    name="Top Players",
+                    value="No one has played yet.",
+                    inline=False,
+                )
+            else:
+                # TODO: Pagination.
+                embed.add_field(
+                    name="Top Players",
+                    value="\n".join(
+                        f"{i + 1}. **[{entry['username']}](https://www.geoguessr.com/user/{entry['user_id']})** "
+                        f"- {entry['score']} points"
+                        for i, entry in enumerate(leaderboard[:10])
+                    ),
+                    inline=False,
+                )
+
+        await ctx.reply(embed=embed)
 
 
 class Bot(commands.Bot):
