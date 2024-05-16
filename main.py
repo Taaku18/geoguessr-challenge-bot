@@ -11,12 +11,17 @@ import typing
 from zoneinfo import ZoneInfo
 
 import aiohttp
+from discord.ext.commands import Context, errors
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright, BrowserContext, Browser, Playwright
 
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
+
+if typing.TYPE_CHECKING:
+    # noinspection PyProtectedMember
+    from discord.ext.commands._types import BotT
 
 load_dotenv()
 discord.utils.setup_logging()
@@ -810,6 +815,9 @@ class Geoguessr(commands.Cog):
                     inline=False,
                 )
 
+            embed.set_footer(text="Leaderboard updated at")
+            embed.timestamp = datetime.datetime.now(tz=tzinfo)
+
         await ctx.reply(embed=embed)
 
 
@@ -864,6 +872,27 @@ class Bot(commands.Bot):
             if guild.id not in authorized_guilds:
                 logging.info("Leaving unauthorized guild %s (%d).", guild, guild.id)
                 await guild.leave()
+
+    async def on_command_error(self, context: Context[BotT], exception: errors.CommandError, /) -> None:
+        """
+        Called when an error occurs while invoking a command.
+
+        :param context: The context in which the error occurred.
+        :param exception: The error that occurred.
+        """
+        if isinstance(exception, errors.CommandOnCooldown):
+            await context.reply(f"Command is on cooldown. Try again in {int(exception.retry_after)} second(s).", ephemeral=True)
+        elif isinstance(exception, errors.CheckFailure):
+            await context.reply("You do not have permission to use this command.", ephemeral=True)
+        elif isinstance(exception, errors.MissingRequiredArgument):
+            await context.reply("Missing required argument.", ephemeral=True)
+        elif isinstance(exception, errors.BadArgument):
+            await context.reply("Invalid argument.", ephemeral=True)
+        elif isinstance(exception, errors.CommandNotFound):
+            pass
+        else:
+            await context.reply("An error occurred while processing the command.", ephemeral=True)
+            logging.error("An error occurred while processing the command.", exc_info=exception)
 
 
 _bot = Bot()
