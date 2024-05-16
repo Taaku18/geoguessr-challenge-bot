@@ -160,18 +160,37 @@ class Geoguessr(commands.Cog):
         await self._load_map_data()
 
     @staticmethod
-    def _get_daily_embed(link: str) -> discord.Embed:
-        date = datetime.datetime.now(tz=tzinfo).strftime("%B %d %Y")
+    def _get_daily_embed(link: str, *, date: str | None = None) -> discord.Embed:
+        """
+        Get the embed for the daily Geoguessr challenge.
+
+        :param link: The Geoguessr challenge link.
+        :param date: The date of the challenge. Default: today. Format: YYYY-MM-DD.
+        :return: The embed.
+        """
+
         short_link = link.replace("https://", "")
-        embed = discord.Embed(
-            title=f"Daily Geoguessr Challenge",
-            description=f"Here is the link to today's Geoguessr challenge:\n[{short_link}]({link})",
-            colour=discord.Colour.from_rgb(167, 199, 231),
-        )
+
+        if date is None:  # Today
+            date = datetime.datetime.now(tz=tzinfo).strftime("%B %d %Y")
+            embed = discord.Embed(
+                title=f"Daily Geoguessr Challenge",
+                description=f"Here is the link to today's Geoguessr challenge:\n[{short_link}]({link})",
+                colour=discord.Colour.from_rgb(167, 199, 231),
+            )
+            embed.set_footer(text=f"Use of external help is not allowed (e.g. Google) · Good luck!")
+
+        else:
+            date_obj = datetime.datetime.strptime(date, "%Y-%m-%d")
+            date = date_obj.strftime("%B %d %Y")
+            date_text = date_obj.strftime("%A, %B %d, %Y")
+            embed = discord.Embed(
+                title=f"Daily Geoguessr Challenge",
+                description=f"Here is the link to the Geoguessr challenge on {date_text}:\n[{short_link}]({link})",
+                colour=discord.Colour.from_rgb(167, 199, 231),
+            )
 
         embed.set_author(name=date, url=link)
-
-        embed.set_footer(text=f"Use of external help is not allowed (e.g. Google) · Good luck!")
         return embed
 
     async def _send_daily_challenge(self, guild: discord.Guild, *, send_leaderboard: bool = False) -> None:
@@ -780,22 +799,73 @@ class Geoguessr(commands.Cog):
         await self.set_daily_config(ctx.guild.id, None)
         await ctx.reply("Daily Geoguessr challenges have been stopped.")
 
+    async def date_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        """
+        Autocomplete the date for the geodaily command.
+
+        :param interaction: The interaction.
+        :param current: The current input.
+        :return: The list of autocomplete choices.
+        """
+        current = current.casefold()
+        choices = ["today", "yesterday"]
+
+        async with self.config_lock:
+            with CONFIG_PATH.open("r") as f:
+                config = json.load(f)
+
+        if str(interaction.guild.id) in config and "daily_links" in config[str(interaction.guild.id)]:
+            for date in reversed(config[str(interaction.guild.id)]["daily_links"].keys()):
+                if current in date:
+                    choices.append(date)
+                if len(choices) >= 15:
+                    break
+
+        return [app_commands.Choice(name=choice, value=choice) for choice in choices]
+
     @commands.cooldown(1, 20, commands.BucketType.user)
     @commands.guild_only()
     @commands.hybrid_command()
-    async def geodaily(self, ctx: commands.Context) -> None:
+    @app_commands.autocomplete(date=date_autocomplete)
+    async def geodaily(self, ctx: commands.Context, *, date: str = "today") -> None:
         """
         Shows the daily Geoguessr challenge.
+
+        :param date: The date of the challenge. Format: today, yesterday, or YYYY-MM-DD.
         """
         await ctx.defer()
-        link = await self.get_daily_link(ctx.guild.id)
+
+        if date.casefold() == "today":
+            date = datetime.datetime.now(tz=tzinfo).strftime("%Y-%m-%d")
+        elif date.casefold() == "yesterday":
+            date = (datetime.datetime.now(tz=tzinfo) - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+        else:
+            try:
+                date = datetime.datetime.strptime(date, "%Y-%m-%d").strftime("%Y-%m-%d")
+            except ValueError:
+                await ctx.reply("Invalid date. Use 'today', 'yesterday', or 'YYYY-MM-DD'.", ephemeral=True)
+                return
+
+        async with self.config_lock:
+            with CONFIG_PATH.open("r") as f:
+                config = json.load(f)
+
+        link = None
+        if str(ctx.guild.id) in config and "daily_links" in config[str(ctx.guild.id)]:
+            link = config[str(ctx.guild.id)]["daily_links"].get(
+                date, None
+            )
+
         if link is None:
-            await ctx.reply("Daily Geoguessr challenge is not set up.", ephemeral=True)
+            if date == datetime.datetime.now(tz=tzinfo).strftime("%Y-%m-%d"):
+                await ctx.reply("Daily Geoguessr challenge is not set up.", ephemeral=True)
+            else:
+                await ctx.reply("Daily Geoguessr challenge for that date is not available.", ephemeral=True)
             return
 
-        embed = self._get_daily_embed(link)
+        embed = self._get_daily_embed(link, date=date)
 
-        leaderboard = await self.get_game_results(ctx.guild.id, datetime.datetime.now(tz=tzinfo).strftime("%Y-%m-%d"))
+        leaderboard = await self.get_game_results(ctx.guild.id, date)
         if leaderboard is not None:
             if not leaderboard:
                 embed.add_field(
