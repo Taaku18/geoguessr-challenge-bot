@@ -211,7 +211,7 @@ class Geoguessr(commands.Cog):
                         name=f"Yesterday's Top Players",
                         value="\n".join(
                             f"{i + 1}. **[{entry['username']}](https://www.geoguessr.com/user/{entry['user_id']})** "
-                            f"- {entry['score']} points"
+                            f"- {entry['score']:,} points"
                             for i, entry in enumerate(leaderboard[:10])
                         ),
                         inline=False,
@@ -589,8 +589,8 @@ class Geoguessr(commands.Cog):
                 for round_ in entry["game"]["player"]["guesses"]:
                     rounds.append(
                         {
-                            "distance": round_["distanceInMeters"],
-                            "score": round_["roundScore"]["amount"],
+                            "distance": float(round_["distanceInMeters"]),
+                            "score": int(round_["roundScore"]["amount"]),
                         }
                     )
 
@@ -598,12 +598,12 @@ class Geoguessr(commands.Cog):
                     {
                         "username": entry["playerName"],
                         "user_id": entry["userId"],
-                        "score": entry["game"]["player"]["totalScore"]["amount"],
-                        "distance": entry["game"]["player"]["totalDistanceInMeters"],
+                        "score": int(entry["game"]["player"]["totalScore"]["amount"]),
+                        "distance": float(entry["game"]["player"]["totalDistanceInMeters"]),
                         "rounds": rounds,
                     }
                 )
-            results.sort(key=lambda x: int(x["score"]), reverse=True)
+            results.sort(key=lambda x: x["score"], reverse=True)
 
         except Exception:
             logger.exception("Failed to get Geoguessr leaderboard.", exc_info=True)
@@ -809,7 +809,7 @@ class Geoguessr(commands.Cog):
                     name="Top Players",
                     value="\n".join(
                         f"{i + 1}. **[{entry['username']}](https://www.geoguessr.com/user/{entry['user_id']})** "
-                        f"- {entry['score']} points"
+                        f"- {entry['score']:,} points"
                         for i, entry in enumerate(leaderboard[:10])
                     ),
                     inline=False,
