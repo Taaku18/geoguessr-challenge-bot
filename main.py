@@ -775,6 +775,7 @@ class Geoguessr(commands.Cog):
         await self.set_daily_config(ctx.guild.id, None)
         await ctx.reply("Daily Geoguessr challenges have been stopped.")
 
+    @commands.cooldown(1, 20, commands.BucketType.user)
     @commands.guild_only()
     @commands.hybrid_command()
     async def geodaily(self, ctx: commands.Context) -> None:
