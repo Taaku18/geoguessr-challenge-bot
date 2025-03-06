@@ -46,14 +46,14 @@ if not CONFIG_PATH.exists():
         json.dump({}, f_, indent=4)
 
 
-class Geoguessr(commands.Cog):
+class GeoGuessr(commands.Cog):
     """
-    A cog for Geoguessr-related commands.
+    A cog for GeoGuessr-related commands.
     """
 
     def __init__(self, bot: Bot):
         """
-        Initialize the Geoguessr cog.
+        Initialize the GeoGuessr cog.
 
         :param bot: The bot instance.
         """
@@ -75,10 +75,10 @@ class Geoguessr(commands.Cog):
 
     async def cog_load(self) -> None:
         """
-        Callback for when the Geoguessr cog loads.
+        Callback for when the GeoGuessr cog loads.
         """
 
-        # Error Geoguessr cookies if not already saved.
+        # Error GeoGuessr cookies if not already saved.
         if not self.main_saved_cookies:
             logger.critical("Cookies are out of date. Please set new cookies (main).")
 
@@ -94,7 +94,7 @@ class Geoguessr(commands.Cog):
 
     async def cog_unload(self) -> None:
         """
-        Callback for when the Geoguessr cog unloads.
+        Callback for when the GeoGuessr cog unloads.
         """
         self.load_map_data.cancel()
         self.load_map_data.stop()
@@ -103,7 +103,7 @@ class Geoguessr(commands.Cog):
 
     async def _load_map_data(self) -> None:
         """
-        Load the data for all maps available on Geoguessr.
+        Load the data for all maps available on GeoGuessr.
         """
         # Load all maps data.
         # noinspection PyBroadException
@@ -145,7 +145,7 @@ class Geoguessr(commands.Cog):
     @tasks.loop(hours=20, reconnect=False)
     async def load_map_data(self) -> None:
         """
-        Hourly task to load the data for all maps available on Geoguessr.
+        Hourly task to load the data for all maps available on GeoGuessr.
         """
         await asyncio.sleep(random.randint(0, 600))  # Random delay of up to 10 minutes to avoid rate limiting.
         await self._load_map_data()
@@ -153,9 +153,9 @@ class Geoguessr(commands.Cog):
     @staticmethod
     def _get_daily_embed(link: str, *, date: str | None = None) -> discord.Embed:
         """
-        Get the embed for the daily Geoguessr challenge.
+        Get the embed for the daily GeoGuessr challenge.
 
-        :param link: The Geoguessr challenge link.
+        :param link: The GeoGuessr challenge link.
         :param date: The date of the challenge. Default: today. Format: YYYY-MM-DD.
         :return: The embed.
         """
@@ -165,8 +165,8 @@ class Geoguessr(commands.Cog):
         if date is None:  # Today
             date = datetime.datetime.now(tz=tzinfo).strftime("%B %d %Y")
             embed = discord.Embed(
-                title=f"Daily Geoguessr Challenge",
-                description=f"Here is the link to today's Geoguessr challenge:\n[{short_link}]({link})",
+                title=f"Daily GeoGuessr Challenge",
+                description=f"Here is the link to today's GeoGuessr challenge:\n[{short_link}]({link})",
                 colour=discord.Colour.from_rgb(167, 199, 231),
             )
             embed.set_footer(text=f"Use of external help is not allowed (e.g. Google) · Good luck!")
@@ -176,8 +176,8 @@ class Geoguessr(commands.Cog):
             date = date_obj.strftime("%B %d %Y")
             date_text = date_obj.strftime("%A, %B %d, %Y")
             embed = discord.Embed(
-                title=f"Daily Geoguessr Challenge",
-                description=f"Here is the link to the Geoguessr challenge on {date_text}:\n[{short_link}]({link})",
+                title=f"Daily GeoGuessr Challenge",
+                description=f"Here is the link to the GeoGuessr challenge on {date_text}:\n[{short_link}]({link})",
                 colour=discord.Colour.from_rgb(167, 199, 231),
             )
 
@@ -186,7 +186,7 @@ class Geoguessr(commands.Cog):
 
     async def _send_daily_challenge(self, guild: discord.Guild, *, send_leaderboard: bool = False) -> None:
         """
-        Send the daily Geoguessr challenge for the specified guild.
+        Send the daily GeoGuessr challenge for the specified guild.
 
         :param guild: The guild.
         """
@@ -196,7 +196,7 @@ class Geoguessr(commands.Cog):
 
         channel = self.bot.get_channel(daily_config["channel"])
         if not channel:
-            logger.error("Daily Geoguessr challenge channel not found.")
+            logger.error("Daily GeoGuessr challenge channel not found.")
             return
 
         # TODO: if cookies are invalid, need to tell user to contact @botowner.
@@ -232,7 +232,7 @@ class Geoguessr(commands.Cog):
 
     async def send_missing_daily_challenges(self) -> None:
         """
-        Send the daily Geoguessr challenges for all guilds that have it set up.
+        Send the daily GeoGuessr challenges for all guilds that have it set up.
         """
         await self.bot.wait_until_ready()
         await asyncio.sleep(30)  # Wait for everything to be ready
@@ -247,7 +247,7 @@ class Geoguessr(commands.Cog):
             if (str(guild.id) in config and "daily_links" in config[str(guild.id)]
                     and "daily_config" in config[str(guild.id)]):
                 if date not in config[str(guild.id)]["daily_links"]:  # Missing challenge
-                    logger.info("Sending missing daily Geoguessr challenge for guild %d.", guild.id)
+                    logger.info("Sending missing daily GeoGuessr challenge for guild %d.", guild.id)
                     await self._send_daily_challenge(guild, send_leaderboard=True)
 
     @tasks.loop(
@@ -256,10 +256,10 @@ class Geoguessr(commands.Cog):
     )
     async def daily_challenge_task(self) -> None:
         """
-        Task to send the daily Geoguessr challenge.
+        Task to send the daily GeoGuessr challenge.
         """
         await self.bot.wait_until_ready()
-        logger.info("Sending daily Geoguessr challenges.")
+        logger.info("Sending daily GeoGuessr challenges.")
         for guild in self.bot.guilds:
             await self._send_daily_challenge(guild, send_leaderboard=True)
 
@@ -338,11 +338,11 @@ class Geoguessr(commands.Cog):
 
     async def get_daily_link(self, guild_id: int, *, force: bool = False) -> str | None:
         """
-        Get the daily Geoguessr challenge link. If it doesn't exist, generate a new one.
+        Get the daily GeoGuessr challenge link. If it doesn't exist, generate a new one.
 
         :param guild_id: The ID of the guild.
         :param force: Whether to force generation of a new link.
-        :return: The Geoguessr challenge link. None if daily challenge is not set up.
+        :return: The GeoGuessr challenge link. None if daily challenge is not set up.
         """
         async with self.config_lock:
             with CONFIG_PATH.open("r") as f:
@@ -368,7 +368,7 @@ class Geoguessr(commands.Cog):
                 auto_guess=True,
             )
             if daily_link is None:
-                logger.error("Failed to get Geoguessr challenge link.")
+                logger.error("Failed to get GeoGuessr challenge link.")
                 return None
 
             async with self.config_lock:
@@ -388,7 +388,7 @@ class Geoguessr(commands.Cog):
     @property
     def headers(self) -> dict[str, str]:
         """
-        Get the headers to use for requests to Geoguessr.
+        Get the headers to use for requests to GeoGuessr.
         """
         return {
             "Referer": "https://www.geoguessr.com/",
@@ -407,7 +407,7 @@ class Geoguessr(commands.Cog):
         auto_guess: bool = False,
     ) -> str | None:
         """
-        Get a Geoguessr challenge link with the specified settings.
+        Get a GeoGuessr challenge link with the specified settings.
 
         :param slug_name: The slug of the map to use.
         :param time_limit: The time limit for the challenge in seconds.
@@ -415,11 +415,11 @@ class Geoguessr(commands.Cog):
         :param no_pan: Whether to forbid rotating.
         :param no_zoom: Whether to forbid zooming.
         :param auto_guess: Whether to automatically guess the location (for daily's).
-        :return: The Geoguessr challenge link. None if an error occurred.
+        :return: The GeoGuessr challenge link. None if an error occurred.
         """
 
         logger.info(
-            "Getting Geoguessr challenge link with options: %s, %s, %s, %s, %s",
+            "Getting GeoGuessr challenge link with options: %s, %s, %s, %s, %s",
             slug_name,
             time_limit,
             no_move,
@@ -427,7 +427,7 @@ class Geoguessr(commands.Cog):
             no_zoom,
         )
 
-        # Get Geoguessr cookies if not already saved.
+        # Get GeoGuessr cookies if not already saved.
         if not self.main_saved_cookies:
             logger.error("Cookies are out of date. Please set new cookies (main).")
             return None
@@ -448,12 +448,12 @@ class Geoguessr(commands.Cog):
                 url = "https://www.geoguessr.com/api/v3/challenges"
                 async with session.post(url, headers=self.headers, json=data) as response:
                     if response.status == 401:  # Unauthorized
-                        logger.error("Failed to get Geoguessr challenge link: unauthorized "
+                        logger.error("Failed to get GeoGuessr challenge link: unauthorized "
                                      "(main cookies may be expired).")
                         return None
 
                     if response.status == 500:
-                        logger.info("Failed to get Geoguessr challenge link: invalid options. %s", data)
+                        logger.info("Failed to get GeoGuessr challenge link: invalid options. %s", data)
                         return None
 
                     response.raise_for_status()
@@ -462,7 +462,7 @@ class Geoguessr(commands.Cog):
                     token = resp["token"]
 
         except Exception:
-            logger.exception("Failed to get Geoguessr challenge link.", exc_info=True)
+            logger.exception("Failed to get GeoGuessr challenge link.", exc_info=True)
             return None
 
         if auto_guess:
@@ -473,11 +473,11 @@ class Geoguessr(commands.Cog):
 
     async def auto_guess(self, token: str) -> None:
         """
-        Automatically guess the location in the Geoguessr challenge (in Antarctica).
+        Automatically guess the location in the GeoGuessr challenge (in Antarctica).
         :param token: The token of the challenge.
         """
 
-        logger.info("Automatically guessing the location in the Geoguessr challenge.")
+        logger.info("Automatically guessing the location in the GeoGuessr challenge.")
         # noinspection PyBroadException
         try:
             # Send POST request with specific cookies in the header using aiohttp
@@ -485,7 +485,7 @@ class Geoguessr(commands.Cog):
                 url = f"https://www.geoguessr.com/api/v3/challenges/{token}"
                 async with session.post(url, headers=self.headers, json={}) as response:
                     if response.status == 401:  # Unauthorized
-                        logger.error("Failed to auto guess Geoguessr challenge: unauthorized "
+                        logger.error("Failed to auto-guess GeoGuessr challenge: unauthorized "
                                      "(auto cookies may be expired).")
                         return
 
@@ -519,14 +519,14 @@ class Geoguessr(commands.Cog):
                         state = (await response.json())["state"]
 
         except Exception:
-            logger.exception("Failed to auto guess Geoguessr challenge.", exc_info=True)
+            logger.exception("Failed to auto-guess GeoGuessr challenge.", exc_info=True)
             return
 
-        logger.info("Successfully guessed the location in the Geoguessr challenge.")
+        logger.info("Successfully guessed the location in the GeoGuessr challenge.")
 
     async def get_game_results(self, guild_id: int, date: str) -> list[dict[str, typing.Any]] | None:
         """
-        Get the daily geoguessr results for the specified date.
+        Get the daily GeoGuessr results for the specified date.
 
         :param guild_id: The ID of the guild.
         :param date: The date of the leaderboard (YYYY-MM-DD).
@@ -560,7 +560,7 @@ class Geoguessr(commands.Cog):
                             if repeat_c == 0:  # The bot might've not guessed yet
                                 await self.auto_guess(token)
                                 continue
-                            logger.error("Failed to get Geoguessr leaderboard: unauthorized. "
+                            logger.error("Failed to get GeoGuessr leaderboard: unauthorized. "
                                          "(auto cookies may be expired).")
                             return None
 
@@ -596,7 +596,7 @@ class Geoguessr(commands.Cog):
             results.sort(key=lambda x: x["score"], reverse=True)
 
         except Exception:
-            logger.exception("Failed to get Geoguessr leaderboard.", exc_info=True)
+            logger.exception("Failed to get GeoGuessr leaderboard.", exc_info=True)
             if "data" in locals():
                 logger.error("Data: %s", data)
             return None
@@ -610,7 +610,7 @@ class Geoguessr(commands.Cog):
         current: str,
     ) -> list[app_commands.Choice[str]]:
         """
-        Autocomplete the map name for the Geoguessr command.
+        Autocomplete the map name for the GeoGuessr command.
 
         :param interaction: The interaction.
         :param current: The current input.
@@ -709,7 +709,7 @@ class Geoguessr(commands.Cog):
         no_zoom: bool = False,
     ) -> None:
         """
-        Start a new Geoguessr challenge.
+        Start a new GeoGuessr challenge.
 
         :param map_name: The name or URL of the map to use. Default: World.
         :param time_limit: The time limit for the challenge in seconds. Default: no time limit.
@@ -725,10 +725,10 @@ class Geoguessr(commands.Cog):
 
         link = await self.get_geoguessr_challenge_link(slug_name, time_limit, no_move, no_pan, no_zoom)
         if link is None:
-            await ctx.reply("Failed to get Geoguessr challenge link.", ephemeral=True)
+            await ctx.reply("Failed to get GeoGuessr challenge link.", ephemeral=True)
             return
 
-        await ctx.reply(f"Hey {ctx.author.mention}! Here is your Geoguessr challenge link:\n{link}")
+        await ctx.reply(f"Hey {ctx.author.mention}! Here is your GeoGuessr challenge link:\n{link}")
 
     @geochallenge.error
     async def geochallenge_error(self, ctx: commands.Context, error: commands.CommandError) -> None:
@@ -762,9 +762,9 @@ class Geoguessr(commands.Cog):
         no_zoom: bool = False,
     ) -> None:
         """
-        Set up the daily Geoguessr challenge channel.
+        Set up the daily GeoGuessr challenge channel.
 
-        :param channel: The channel to set as the daily Geoguessr challenge channel.
+        :param channel: The channel to set as the daily GeoGuessr challenge channel.
         :param map_name: The name or URL of the map to use. Default: World.
         :param time_limit: The time limit for the challenge in seconds. Default: 3 minutes.
         :param no_move: Whether to forbid moving. Default: moving is allowed.
@@ -793,7 +793,7 @@ class Geoguessr(commands.Cog):
         )
 
         await ctx.reply(
-            f"Daily Geoguessr challenge channel set to {channel.mention}!"
+            f"Daily GeoGuessr challenge channel set to {channel.mention}!"
             f"\n\nMap: {map_name}\nTime Limit: {time_limit_text}\n{mpz}"
         )
 
@@ -802,14 +802,14 @@ class Geoguessr(commands.Cog):
     @commands.hybrid_command()
     async def cancelgeodaily(self, ctx: commands.Context) -> None:
         """
-        Stop sending daily Geoguessr challenges.
+        Stop sending daily GeoGuessr challenges.
         """
         if self.get_daily_config(ctx.guild.id) is None:
-            await ctx.reply("Daily Geoguessr challenges are not set up.", ephemeral=True)
+            await ctx.reply("Daily GeoGuessr challenges are not set up.", ephemeral=True)
             return
 
         await self.set_daily_config(ctx.guild.id, None)
-        await ctx.reply("Daily Geoguessr challenges have been stopped.")
+        await ctx.reply("Daily GeoGuessr challenges have been stopped.")
 
     async def date_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
         """
@@ -841,7 +841,7 @@ class Geoguessr(commands.Cog):
     @app_commands.autocomplete(date=date_autocomplete)
     async def geodaily(self, ctx: commands.Context, *, date: str = "Today") -> None:
         """
-        Shows the daily Geoguessr challenge.
+        Shows the daily GeoGuessr challenge.
 
         :param date: The date of the challenge. Format: today, yesterday, or YYYY-MM-DD.
         """
@@ -870,9 +870,9 @@ class Geoguessr(commands.Cog):
 
         if link is None:
             if date == datetime.datetime.now(tz=tzinfo).strftime("%Y-%m-%d"):
-                await ctx.reply("Daily Geoguessr challenge is not set up.", ephemeral=True)
+                await ctx.reply("Daily GeoGuessr challenge is not set up.", ephemeral=True)
             else:
-                await ctx.reply("Daily Geoguessr challenge for that date is not available.", ephemeral=True)
+                await ctx.reply("Daily GeoGuessr challenge for that date is not available.", ephemeral=True)
             return
 
         embed = self._get_daily_embed(link, date=date)
@@ -948,7 +948,7 @@ class Bot(commands.Bot):
         """
         Set up the bot.
         """
-        await self.add_cog(Geoguessr(self))
+        await self.add_cog(GeoGuessr(self))
         if SYNCING_TREE:
             await self.tree.sync()
 
