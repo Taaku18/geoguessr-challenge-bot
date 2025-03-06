@@ -229,7 +229,10 @@ class GeoGuessr(commands.Cog):
                         inline=False,
                     )
 
-        await channel.send(embed=embed)
+        if "ping_role" in daily_config and daily_config["ping_role"]:
+            await channel.send(daily_config["ping_role"], embed=embed, allowed_mentions=discord.AllowedMentions.all())
+        else:
+            await channel.send(embed=embed)
 
     async def send_missing_daily_challenges(self) -> None:
         """
@@ -299,6 +302,7 @@ class GeoGuessr(commands.Cog):
         no_move: bool = False,
         no_pan: bool = False,
         no_zoom: bool = False,
+        ping_role_mention: str | None = None,
     ) -> None:
         """
         Set the daily config for the specified guild.
@@ -310,6 +314,7 @@ class GeoGuessr(commands.Cog):
         :param no_move: Whether to forbid moving.
         :param no_pan: Whether to forbid panning.
         :param no_zoom: Whether to forbid zooming.
+        :param ping_role_mention: The role to ping when the daily challenge is sent.
         """
 
         async with self.config_lock:
@@ -332,8 +337,12 @@ class GeoGuessr(commands.Cog):
                     "no_move": no_move,
                     "no_pan": no_pan,
                     "no_zoom": no_zoom,
+                    "ping_role": ping_role_mention,
                 }
-                config[str(guild_id)]["daily_links"] = {}
+
+                if "daily_links" not in config[str(guild_id)]:  # Do not clear old data
+                    config[str(guild_id)]["daily_links"] = {}
+
             with CONFIG_PATH.open("w") as f:
                 json.dump(config, f, indent=4)
 
@@ -756,7 +765,8 @@ class GeoGuessr(commands.Cog):
     @commands.has_guild_permissions(manage_guild=True)
     @commands.hybrid_command()
     @app_commands.rename(
-        map_name="map", time_limit="time-limit", no_move="no-moving", no_pan="no-panning", no_zoom="no-zooming"
+        map_name="map", time_limit="time-limit", no_move="no-moving", no_pan="no-panning", no_zoom="no-zooming",
+        ping_role="ping-role"
     )
     @app_commands.autocomplete(map_name=map_name_autocomplete)
     async def setupgeodaily(
@@ -768,6 +778,7 @@ class GeoGuessr(commands.Cog):
         no_move: bool = False,
         no_pan: bool = False,
         no_zoom: bool = False,
+        ping_role: discord.Role | None = None,
     ) -> None:
         """
         Set up the daily GeoGuessr challenge channel.
@@ -778,7 +789,9 @@ class GeoGuessr(commands.Cog):
         :param no_move: Whether to forbid moving. Default: moving is allowed.
         :param no_pan: Whether to forbid panning. Default: panning is allowed.
         :param no_zoom: Whether to forbid zooming. Default: zooming is allowed.
+        :param ping_role: The role to ping when the daily challenge is sent.
         """
+
         if channel is None:
             channel = ctx.channel
 
@@ -787,7 +800,28 @@ class GeoGuessr(commands.Cog):
                 await ctx.reply("Map not found.", ephemeral=True)
                 return
 
-        await self.set_daily_config(ctx.guild.id, channel.id, slug_name, time_limit, no_move, no_pan, no_zoom)
+        if ping_role:
+            if ping_role.is_default():  # Everyone role
+                if not channel.permissions_for(ctx.guild.me).mention_everyone:
+                    await ctx.reply(f"I don't have permission to ping @everyone in {channel.mention}. "
+                                    "I will need the mention all roles permission.",
+                                    allowed_mentions=discord.AllowedMentions.none(),
+                                    ephemeral=True)
+                    return
+                ping_role_mention = "@everyone"
+            else:
+                if not ping_role.mentionable and not channel.permissions_for(ctx.guild.me).mention_everyone:
+                    await ctx.reply(f"I don't have permission to ping {ping_role.mention} in {channel.mention}. "
+                                    f"I will need the mention all roles permission.",
+                                    allowed_mentions=discord.AllowedMentions.none(),
+                                    ephemeral=True)
+                    return
+                ping_role_mention = ping_role.mention
+        else:
+            ping_role_mention = None
+
+        await self.set_daily_config(ctx.guild.id, channel.id, slug_name, time_limit,
+                                    no_move, no_pan, no_zoom, ping_role_mention)
 
         await self.get_daily_link(ctx.guild.id, force=True)  # Force generation of a new link
         await self._send_daily_challenge(ctx.guild)
@@ -800,10 +834,14 @@ class GeoGuessr(commands.Cog):
             f"Zooming: {'❌' if no_zoom else '✅'}"
         )
 
+        if ping_role:
+            mpz += f"\n\nPing: {ping_role_mention}"
+
         logger.info("Daily GeoGuessr challenge channel set to %d in guild %d.", channel.id, ctx.guild.id)
         await ctx.reply(
             f"Daily GeoGuessr challenge channel set to {channel.mention}!"
-            f"\n\nMap: {map_name}\nTime Limit: {time_limit_text}\n{mpz}"
+            f"\n\nMap: {map_name}\nTime Limit: {time_limit_text}\n{mpz}",
+            allowed_mentions=discord.AllowedMentions.none()
         )
 
     @commands.guild_only()

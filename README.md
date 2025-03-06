@@ -34,7 +34,7 @@ Pre-requisites: `docker`. Without Docker works too, but you will need to figure 
     ```
 5. Invite the bot to your server by visiting the following link:
    ```
-   https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=309237763072&integration_type=0&scope=bot+applications.commands
+   https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=309237894208&integration_type=0&scope=bot+applications.commands
    ```
     Replace `YOUR_CLIENT_ID` with your bot's client ID. You can find this in the Discord Developer Portal.
 
