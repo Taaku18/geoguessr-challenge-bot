@@ -7,6 +7,7 @@ import logging
 import os
 import pathlib
 import random
+import re
 import typing
 from zoneinfo import ZoneInfo
 
@@ -87,6 +88,9 @@ class Geoguessr(commands.Cog):
         await self._load_map_data()
         self.load_map_data.start()
         self.daily_challenge_task.start()
+
+        # noinspection PyAsyncCall
+        asyncio.create_task(self.send_missing_daily_challenges())
 
     async def cog_unload(self) -> None:
         """
@@ -226,6 +230,26 @@ class Geoguessr(commands.Cog):
 
         await channel.send(embed=embed)
 
+    async def send_missing_daily_challenges(self) -> None:
+        """
+        Send the daily Geoguessr challenges for all guilds that have it set up.
+        """
+        await self.bot.wait_until_ready()
+        await asyncio.sleep(30)  # Wait for everything to be ready
+
+        async with self.config_lock:
+            with CONFIG_PATH.open("r") as f:
+                config = json.load(f)
+
+        date = datetime.datetime.now(tz=tzinfo).strftime("%Y-%m-%d")
+
+        for guild in self.bot.guilds:
+            if (str(guild.id) in config and "daily_links" in config[str(guild.id)]
+                    and "daily_config" in config[str(guild.id)]):
+                if date not in config[str(guild.id)]["daily_links"]:  # Missing challenge
+                    logger.info("Sending missing daily Geoguessr challenge for guild %d.", guild.id)
+                    await self._send_daily_challenge(guild, send_leaderboard=True)
+
     @tasks.loop(
         time=datetime.time(hour=0, minute=0, second=0, tzinfo=tzinfo),
         reconnect=False,
@@ -234,6 +258,7 @@ class Geoguessr(commands.Cog):
         """
         Task to send the daily Geoguessr challenge.
         """
+        await self.bot.wait_until_ready()
         logger.info("Sending daily Geoguessr challenges.")
         for guild in self.bot.guilds:
             await self._send_daily_challenge(guild, send_leaderboard=True)
@@ -268,7 +293,6 @@ class Geoguessr(commands.Cog):
         self,
         guild_id: int,
         channel_id: int | None,
-        map_name: str = "World",
         slug_name: str = "world",
         time_limit: int = 0,
         no_move: bool = False,
@@ -280,7 +304,6 @@ class Geoguessr(commands.Cog):
 
         :param guild_id: The ID of the guild.
         :param channel_id: The ID of the channel. Set to None to remove the daily channel.
-        :param map_name: The name of the map to use.
         :param slug_name: The slug of the map to use.
         :param time_limit: The time limit for the challenge in seconds.
         :param no_move: Whether to forbid moving.
@@ -295,6 +318,8 @@ class Geoguessr(commands.Cog):
                 if str(guild_id) in config and "daily_config" in config[str(guild_id)]:
                     del config[str(guild_id)]["daily_config"]
             else:
+                map_name = await self.fetch_name_from_slug(slug_name)  # Get the proper name
+
                 if str(guild_id) not in config:
                     config[str(guild_id)] = {}
 
@@ -307,6 +332,7 @@ class Geoguessr(commands.Cog):
                     "no_pan": no_pan,
                     "no_zoom": no_zoom,
                 }
+                config[str(guild_id)]["daily_links"] = {}
             with CONFIG_PATH.open("w") as f:
                 json.dump(config, f, indent=4)
 
@@ -459,7 +485,7 @@ class Geoguessr(commands.Cog):
                 url = f"https://www.geoguessr.com/api/v3/challenges/{token}"
                 async with session.post(url, headers=self.headers, json={}) as response:
                     if response.status == 401:  # Unauthorized
-                        logger.error("Failed to get Geoguessr challenge link: unauthorized "
+                        logger.error("Failed to auto guess Geoguessr challenge: unauthorized "
                                      "(auto cookies may be expired).")
                         return
 
@@ -493,7 +519,7 @@ class Geoguessr(commands.Cog):
                         state = (await response.json())["state"]
 
         except Exception:
-            logger.exception("Failed to get Geoguessr challenge link.", exc_info=True)
+            logger.exception("Failed to auto guess Geoguessr challenge.", exc_info=True)
             return
 
         logger.info("Successfully guessed the location in the Geoguessr challenge.")
@@ -624,6 +650,49 @@ class Geoguessr(commands.Cog):
             map_name_mapping.setdefault(data["countryCode"].casefold(), slug)
         return map_name_mapping.get(map_name.casefold(), None)
 
+    @staticmethod
+    def _parse_map_url(url: str) -> str | None:
+        """
+        Retrieve the slug name by the map URL.
+
+        :param url: The map URL.
+        :return: The parsed slug name. None if invalid.
+        """
+        if (slug_name_match := re.search(r"(?:https?://)?www.geoguessr.com/maps/([^/]+)", url)) is not None:
+            slug_name = slug_name_match.group(1).lower()
+            if slug_name == 'community':
+                return None
+            return slug_name
+        return None
+
+    async def fetch_name_from_slug(self, slug_name: str) -> str:
+        """
+        Fetch the name of the map from the slug name.
+
+        :param slug_name: The slug name.
+        :return: The name of the map. None if not found.
+        """
+        if slug_name in self.all_maps_data:
+            return self.all_maps_data[slug_name]["name"]
+
+        # noinspection PyBroadException
+        try:
+            async with aiohttp.ClientSession(cookies=self.main_saved_cookies) as session:
+                url = f"https://www.geoguessr.com/api/v3/search/map?page=0&count=1&q={slug_name}"
+                async with session.get(url, headers=self.headers | {"Content-Type": "application/json"}) as response:
+                    if response.status == 401:
+                        logger.error("Failed to fetch map name: unauthorized. (main cookies may be expired).")
+                        return slug_name
+                    response.raise_for_status()
+                    data = await response.json()
+                    if not data or data[0]["id"] != slug_name:
+                        logger.warning("No map found or wrong map data fetched: %s", data)
+                        return slug_name
+                    return data[0]["name"]
+        except Exception:
+            logger.exception("Failed to fetch map name.", exc_info=True)
+            return slug_name
+
     @commands.cooldown(1, 60, commands.BucketType.user)
     @commands.hybrid_command()
     @app_commands.rename(
@@ -642,7 +711,7 @@ class Geoguessr(commands.Cog):
         """
         Start a new Geoguessr challenge.
 
-        :param map_name: The name of the map to use. Default: World.
+        :param map_name: The name or URL of the map to use. Default: World.
         :param time_limit: The time limit for the challenge in seconds. Default: no time limit.
         :param no_move: Whether to forbid moving. Default: moving is allowed.
         :param no_pan: Whether to forbid panning. Default: panning is allowed.
@@ -650,8 +719,9 @@ class Geoguessr(commands.Cog):
         """
 
         if (slug_name := self._parse_slug_name(map_name)) is None:
-            await ctx.reply("Map not found.", ephemeral=True)
-            return
+            if (slug_name := self._parse_map_url(map_name)) is None:
+                await ctx.reply("Map not found.", ephemeral=True)
+                return
 
         link = await self.get_geoguessr_challenge_link(slug_name, time_limit, no_move, no_pan, no_zoom)
         if link is None:
@@ -695,7 +765,7 @@ class Geoguessr(commands.Cog):
         Set up the daily Geoguessr challenge channel.
 
         :param channel: The channel to set as the daily Geoguessr challenge channel.
-        :param map_name: The name of the map to use. Default: World.
+        :param map_name: The name or URL of the map to use. Default: World.
         :param time_limit: The time limit for the challenge in seconds. Default: 3 minutes.
         :param no_move: Whether to forbid moving. Default: moving is allowed.
         :param no_pan: Whether to forbid panning. Default: panning is allowed.
@@ -705,11 +775,11 @@ class Geoguessr(commands.Cog):
             channel = ctx.channel
 
         if (slug_name := self._parse_slug_name(map_name)) is None:
-            await ctx.reply("Map not found.", ephemeral=True)
-            return
-        map_name = self.all_maps_data[slug_name]["name"]  # Get the proper name
+            if (slug_name := self._parse_map_url(map_name)) is None:
+                await ctx.reply("Map not found.", ephemeral=True)
+                return
 
-        await self.set_daily_config(ctx.guild.id, channel.id, map_name, slug_name, time_limit, no_move, no_pan, no_zoom)
+        await self.set_daily_config(ctx.guild.id, channel.id, slug_name, time_limit, no_move, no_pan, no_zoom)
 
         await self.get_daily_link(ctx.guild.id, force=True)  # Force generation of a new link
         await self._send_daily_challenge(ctx.guild)
@@ -838,7 +908,6 @@ class Geoguessr(commands.Cog):
         Process owner only commands sent in DMs.
         """
         if await self.bot.is_owner(message.author) and isinstance(message.channel, discord.DMChannel):
-            # TODO: Implement manual command sync
             if message.content.casefold().startswith('!maintoken '):
                 token = message.content.split('!maintoken ', maxsplit=1)[1]
                 self.main_saved_cookies = {"_ncfa": token}
@@ -852,6 +921,11 @@ class Geoguessr(commands.Cog):
                 with AUTO_COOKIE_DUMP_PATH.open("w") as f:
                     json.dump(self.auto_saved_cookies, f)
                 await message.reply("Auto cookies set.")
+
+            elif message.content.casefold().startswith('!sync'):
+                logger.info("Syncing commands.")
+                await self.bot.tree.sync()
+                await message.reply("Commands synced.")
 
 
 class Bot(commands.Bot):

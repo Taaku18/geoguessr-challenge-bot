@@ -32,21 +32,32 @@ Pre-requisites: `docker`. Without Docker works too, but you will need to figure 
     ```bash
     docker run -d --name geoguessr-challenge-bot --env-file .env --restart on-failure -v data:/geoguessr/data geoguessr-challenge-bot:latest
     ```
+5. Invite the bot to your server by visiting the following link:
+   ```
+   https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=309237763072&integration_type=0&scope=bot+applications.commands
+   ```
+    Replace `YOUR_CLIENT_ID` with your bot's client ID. You can find this in the Discord Developer Portal.
+
+6. Set the session tokens for your Geoguessr account(s) by DMing the bot (as the bot owner) the following commands:
+   ```
+   !maintoken MAIN_SESSION_TOKEN
+   !autotoken AUTO_SESSION_TOKEN
+   ```
+   The session tokens can be found by:
+
+   1. Login to Geoguessr in your web browser. 
+   2. Open the developer tools and navigate Application → Storage → Cookies. 
+   3. Copy the value of the `_ncfa` cookie (that's the account's session cookie).
+
+   Unfortunately, the bot can no longer retrieve the session token automatically due to Cloudflare anti-bot protection. The session token may expire after a while, so you may need to update occasionally.
+
+7. Sync the bot's slash commands by DMing the bot (as the bot owner) the following command:
+   ```
+   !sync
+   ```
+
 
 # Usage
-
-Set the session token for your Geoguessr account by DMing the bot (as the bot owner) with the following command:
-```
-!maintoken MAIN_SESSION_TOKEN
-!autotoken AUTO_SESSION_TOKEN
-```
-The session tokens can be found by:
-
-1. Login to Geoguessr in your web browser. 
-2. Open the developer tools and navigate Application → Storage → Cookies. 
-3. Copy the value of the `_ncfa` cookie (that's the account's session cookie).
-
-Unfortunately, the bot cannot retrieve the session token for you due to Cloudflare bot protection, so you will need to do this manually. The session token may expire after a while, so you may need to update occasionally.
 
 The bot has the following commands:
 - `/geochallenge`: Create a challenge link.
