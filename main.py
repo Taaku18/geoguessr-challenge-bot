@@ -15,7 +15,7 @@ from discord.ext.commands import Context, errors
 from dotenv import load_dotenv
 
 import discord
-from discord import app_commands, Message
+from discord import app_commands
 from discord.ext import commands, tasks
 
 if typing.TYPE_CHECKING:
@@ -833,7 +833,7 @@ class Geoguessr(commands.Cog):
         await ctx.reply(embed=embed)
 
     @commands.Cog.listener()
-    async def on_message(self, message: Message, /) -> None:
+    async def on_message(self, message: discord.Message, /) -> None:
         """
         Process owner only commands sent in DMs.
         """
