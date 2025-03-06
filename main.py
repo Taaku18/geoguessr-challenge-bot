@@ -189,6 +189,7 @@ class GeoGuessr(commands.Cog):
         Send the daily GeoGuessr challenge for the specified guild.
 
         :param guild: The guild.
+        :param send_leaderboard: Whether to send the leaderboard.
         """
         daily_config = await self.get_daily_config(guild.id)
         if daily_config is None:
@@ -631,6 +632,12 @@ class GeoGuessr(commands.Cog):
             ]
         )
         possibilities = possibilities[:25]  # Limit to 25 choices
+        if not possibilities:
+            if current in self.all_maps_data:
+                possibilities.append((self.all_maps_data[current]["name"], current))
+            elif "geoguessr.com/maps/" in current:
+                possibilities.append((current, current))
+
         return [app_commands.Choice(name=name, value=slug) for name, slug in possibilities]
 
     def _parse_slug_name(self, map_name: str) -> str | None:
@@ -658,7 +665,8 @@ class GeoGuessr(commands.Cog):
         :param url: The map URL.
         :return: The parsed slug name. None if invalid.
         """
-        if (slug_name_match := re.search(r"(?:https?://)?www.geoguessr.com/maps/([^/]+)", url)) is not None:
+        if (slug_name_match := re.search(r"^(?:https?://)?(?:www\.)?geoguessr\.com/maps/([^/]+)",
+                                         url)) is not None:
             slug_name = slug_name_match.group(1).lower()
             if slug_name == 'community':
                 return None
@@ -792,6 +800,7 @@ class GeoGuessr(commands.Cog):
             f"Zooming: {'❌' if no_zoom else '✅'}"
         )
 
+        logger.info("Daily GeoGuessr challenge channel set to %d in guild %d.", channel.id, ctx.guild.id)
         await ctx.reply(
             f"Daily GeoGuessr challenge channel set to {channel.mention}!"
             f"\n\nMap: {map_name}\nTime Limit: {time_limit_text}\n{mpz}"
