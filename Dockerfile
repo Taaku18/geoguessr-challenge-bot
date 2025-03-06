@@ -1,6 +1,6 @@
-FROM python:3.12 as py
+FROM python:3.12 AS py
 
-FROM py as build
+FROM py AS build
 
 RUN apt update
 
