@@ -11,8 +11,6 @@ FROM py
 
 COPY --from=build /inst /usr/local
 
-RUN playwright install --with-deps
-
 WORKDIR /geoguessr
 CMD ["python", "main.py"]
 COPY . /geoguessr
