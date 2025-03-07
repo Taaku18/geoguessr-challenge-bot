@@ -710,10 +710,11 @@ class GeoGuessr(commands.Cog):
             logger.exception("Failed to fetch map name.", exc_info=True)
             return slug_name
 
-    @commands.cooldown(1, 60, commands.BucketType.user)
+    @commands.cooldown(1, 120, commands.BucketType.user)
     @commands.hybrid_command()
     @app_commands.rename(
-        map_name="map", time_limit="time-limit", no_move="no-moving", no_pan="no-panning", no_zoom="no-zooming"
+        map_name="map", time_limit="time-limit", allow_move="allow-moving",
+        allow_pan="allow-panning", allow_zoom="allow-zooming"
     )
     @app_commands.autocomplete(map_name=map_name_autocomplete)
     async def geochallenge(
@@ -721,19 +722,22 @@ class GeoGuessr(commands.Cog):
         ctx: commands.Context,
         map_name: str = "World",
         time_limit: commands.Range[int, 0] = 0,
-        no_move: bool = False,
-        no_pan: bool = False,
-        no_zoom: bool = False,
+        allow_move: bool = True,
+        allow_pan: bool = True,
+        allow_zoom: bool = True,
     ) -> None:
         """
         Start a new GeoGuessr challenge.
 
         :param map_name: The name or URL of the map to use. Default: World.
         :param time_limit: The time limit for the challenge in seconds. Default: no time limit.
-        :param no_move: Whether to forbid moving. Default: moving is allowed.
-        :param no_pan: Whether to forbid panning. Default: panning is allowed.
-        :param no_zoom: Whether to forbid zooming. Default: zooming is allowed.
+        :param allow_move: Whether to allow moving. Default: moving is allowed.
+        :param allow_pan: Whether to allow panning. Default: panning is allowed.
+        :param allow_zoom: Whether to allow zooming. Default: zooming is allowed.
         """
+        no_move = not allow_move
+        no_pan = not allow_pan
+        no_zoom = not allow_zoom
 
         if (slug_name := self._parse_slug_name(map_name)) is None:
             if (slug_name := self._parse_map_url(map_name)) is None:
@@ -756,16 +760,17 @@ class GeoGuessr(commands.Cog):
         :param error: The error that occurred.
         """
         if isinstance(error, commands.CommandOnCooldown):
-            await ctx.reply(f"You can only generate 1 challenge link per minute.", ephemeral=True)
+            await ctx.reply(f"You can only generate a challenge link every 2 minutes.", ephemeral=True)
         else:
             await ctx.reply("An error occurred while processing the command.", ephemeral=True)
             logger.error("An error occurred while processing the command.", exc_info=error)
 
     @commands.guild_only()
+    @commands.cooldown(1, 60, commands.BucketType.guild)
     @commands.hybrid_command()
     @app_commands.rename(
-        map_name="map", time_limit="time-limit", no_move="no-moving", no_pan="no-panning", no_zoom="no-zooming",
-        ping_role="ping-role"
+        map_name="map", time_limit="time-limit", allow_move="allow-moving",
+        allow_pan="allow-panning", allow_zoom="allow-zooming", ping_role="ping-role"
     )
     @app_commands.autocomplete(map_name=map_name_autocomplete)
     async def setupgeodaily(
@@ -774,9 +779,9 @@ class GeoGuessr(commands.Cog):
         channel: discord.TextChannel | None = None,
         map_name: str = "World",
         time_limit: commands.Range[int, 0] = 180,
-        no_move: bool = False,
-        no_pan: bool = False,
-        no_zoom: bool = False,
+        allow_move: bool = True,
+        allow_pan: bool = True,
+        allow_zoom: bool = True,
         ping_role: discord.Role | None = None,
     ) -> None:
         """
@@ -785,11 +790,14 @@ class GeoGuessr(commands.Cog):
         :param channel: The channel to set as the daily GeoGuessr challenge channel.
         :param map_name: The name or URL of the map to use. Default: World.
         :param time_limit: The time limit for the challenge in seconds. Default: 3 minutes.
-        :param no_move: Whether to forbid moving. Default: moving is allowed.
-        :param no_pan: Whether to forbid panning. Default: panning is allowed.
-        :param no_zoom: Whether to forbid zooming. Default: zooming is allowed.
+        :param allow_move: Whether to allow moving. Default: moving is allowed.
+        :param allow_pan: Whether to allow panning. Default: panning is allowed.
+        :param allow_zoom: Whether to allow zooming. Default: zooming is allowed.
         :param ping_role: The role to ping when the daily challenge is sent.
         """
+        no_move = not allow_move
+        no_pan = not allow_pan
+        no_zoom = not allow_zoom
 
         if channel is None:
             channel = ctx.channel
@@ -891,7 +899,7 @@ class GeoGuessr(commands.Cog):
 
         logger.info("Daily GeoGuessr challenge channel set to %d in guild %d.", channel.id, ctx.guild.id)
         await ctx.reply(
-            f"Daily GeoGuessr challenge channel set to {channel.mention}!"
+            f"Daily GeoGuessr challenge channel set to {channel.mention}."
             f"\n\nMap: {map_name}\nTime Limit: {time_limit_text}\n{mpz}",
             allowed_mentions=discord.AllowedMentions.none()
         )
