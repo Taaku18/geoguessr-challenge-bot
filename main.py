@@ -762,7 +762,6 @@ class GeoGuessr(commands.Cog):
             logger.error("An error occurred while processing the command.", exc_info=error)
 
     @commands.guild_only()
-    @commands.has_guild_permissions(manage_guild=True)
     @commands.hybrid_command()
     @app_commands.rename(
         map_name="map", time_limit="time-limit", no_move="no-moving", no_pan="no-panning", no_zoom="no-zooming",
@@ -795,6 +794,39 @@ class GeoGuessr(commands.Cog):
         if channel is None:
             channel = ctx.channel
 
+        daily_config = await self.get_daily_config(ctx.guild.id)
+        if daily_config is not None:  # Daily challenge already set up
+            old_channel = self.bot.get_channel(daily_config["channel"])
+            if old_channel == channel:
+                pass  # Same channel, permissions check proceed later
+            else:
+                # Different channel, need manage_guild permission or manage_messages in the old channel
+                if (not ctx.author.guild_permissions.manage_guild and not
+                    (old_channel.permissions_for(ctx.author).manage_messages
+                        and old_channel.permissions_for(ctx.guild.me).read_messages
+                        and old_channel.permissions_for(ctx.guild.me).send_messages)):
+                    await ctx.reply(f"Daily GeoGuessr challenge is already set up in {old_channel.mention}. "
+                                    "You don't have permission to modify the daily challenge.",
+                                    ephemeral=True)
+                    return
+
+        # Need manage_guild permission or manage_messages in the channel
+        if (not ctx.author.guild_permissions.manage_guild and not
+            (channel.permissions_for(ctx.author).manage_messages
+                and channel.permissions_for(ctx.guild.me).read_messages
+                and channel.permissions_for(ctx.guild.me).send_messages)):
+            await ctx.reply(f"You need the manage messages permission in {channel.mention} "
+                            "to manage the daily challenge.",
+                            ephemeral=True)
+            return
+
+        # I need send_messages, read_messages, and embed_links permissions in the channel
+        if not (channel.permissions_for(ctx.guild.me).send_messages
+                and channel.permissions_for(ctx.guild.me).read_messages
+                and channel.permissions_for(ctx.guild.me).embed_links):
+            await ctx.reply("I don't have permission to send messages in that channel.", ephemeral=True)
+            return
+
         if (slug_name := self._parse_slug_name(map_name)) is None:
             if (slug_name := self._parse_map_url(map_name)) is None:
                 await ctx.reply("Map not found.", ephemeral=True)
@@ -802,6 +834,15 @@ class GeoGuessr(commands.Cog):
 
         if ping_role:
             if ping_role.is_default():  # Everyone role
+                # Check if the user can ping @everyone in the channel
+                if not (channel.permissions_for(ctx.author).mention_everyone
+                        and channel.permissions_for(ctx.author).read_messages
+                        and channel.permissions_for(ctx.author).send_messages):
+                    await ctx.reply("You cannot set this ping role, "
+                                    f"since you don't have permission to ping @everyone in {channel.mention}.",
+                                    allowed_mentions=discord.AllowedMentions.none(),
+                                    ephemeral=True)
+                    return
                 if not channel.permissions_for(ctx.guild.me).mention_everyone:
                     await ctx.reply(f"I don't have permission to ping @everyone in {channel.mention}. "
                                     "I will need the mention all roles permission.",
@@ -810,12 +851,23 @@ class GeoGuessr(commands.Cog):
                     return
                 ping_role_mention = "@everyone"
             else:
-                if not ping_role.mentionable and not channel.permissions_for(ctx.guild.me).mention_everyone:
-                    await ctx.reply(f"I don't have permission to ping {ping_role.mention} in {channel.mention}. "
-                                    f"I will need the mention all roles permission.",
-                                    allowed_mentions=discord.AllowedMentions.none(),
-                                    ephemeral=True)
-                    return
+                if not ping_role.mentionable:
+                    if not (channel.permissions_for(ctx.author).mention_everyone
+                            and channel.permissions_for(ctx.author).read_messages
+                            and channel.permissions_for(ctx.author).send_messages):
+                        await ctx.reply("You cannot set this ping role, "
+                                        "since you don't have permission to ping "
+                                        f"{ping_role.mention} in {channel.mention}.",
+                                        allowed_mentions=discord.AllowedMentions.none(),
+                                        ephemeral=True)
+                        return
+                    if not channel.permissions_for(ctx.guild.me).mention_everyone:
+                        await ctx.reply("I don't have permission to ping "
+                                        f"{ping_role.mention} in {channel.mention}. "
+                                        f"I will need the mention all roles permission.",
+                                        allowed_mentions=discord.AllowedMentions.none(),
+                                        ephemeral=True)
+                        return
                 ping_role_mention = ping_role.mention
         else:
             ping_role_mention = None
@@ -845,14 +897,26 @@ class GeoGuessr(commands.Cog):
         )
 
     @commands.guild_only()
-    @commands.has_guild_permissions(manage_guild=True)
     @commands.hybrid_command()
     async def cancelgeodaily(self, ctx: commands.Context) -> None:
         """
         Stop sending daily GeoGuessr challenges.
         """
-        if self.get_daily_config(ctx.guild.id) is None:
+        daily_config = await self.get_daily_config(ctx.guild.id)
+        if daily_config is None:
             await ctx.reply("Daily GeoGuessr challenges are not set up.", ephemeral=True)
+            return
+
+        channel = self.bot.get_channel(daily_config["channel"])
+
+        # Need manage_guild permission or manage_messages in the channel
+        if (not ctx.author.guild_permissions.manage_guild and not
+            (channel.permissions_for(ctx.author).manage_messages
+             and channel.permissions_for(ctx.guild.me).read_messages
+             and channel.permissions_for(ctx.guild.me).send_messages)):
+            await ctx.reply(f"You need the manage messages permission in {channel.mention} "
+                            "to manage the daily challenge.",
+                            ephemeral=True)
             return
 
         await self.set_daily_config(ctx.guild.id, None)
