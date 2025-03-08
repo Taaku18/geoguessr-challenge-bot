@@ -1086,7 +1086,7 @@ class Bot(commands.Bot):
         intents.guilds = True
         intents.dm_messages = True
 
-        super().__init__([], intents=intents)  # No prefix
+        super().__init__([], intents=intents, activity=discord.Game("GeoGuessr 📍🗺"))  # No prefix
 
     async def setup_hook(self) -> None:
         """
