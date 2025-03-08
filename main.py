@@ -59,6 +59,7 @@ class GeoGuessr(commands.Cog):
         """
         self.bot = bot
         self.config_lock = asyncio.Lock()
+        self._daily_challenge_task = None
 
         # Load saved cookies.
         self.main_saved_cookies: dict[str, str] = {}
@@ -87,10 +88,9 @@ class GeoGuessr(commands.Cog):
 
         await self._load_map_data()
         self.load_map_data.start()
-        self.daily_challenge_task.start()
 
         # noinspection PyAsyncCall
-        asyncio.create_task(self.send_missing_daily_challenges())
+        self._daily_challenge_task = asyncio.create_task(self.daily_challenge_task())
 
     async def cog_unload(self) -> None:
         """
@@ -98,8 +98,9 @@ class GeoGuessr(commands.Cog):
         """
         self.load_map_data.cancel()
         self.load_map_data.stop()
-        self.daily_challenge_task.cancel()
-        self.daily_challenge_task.stop()
+        if self._daily_challenge_task is not None:
+            self._daily_challenge_task.cancel()
+            self._daily_challenge_task = None
 
     async def _load_map_data(self) -> None:
         """
@@ -195,6 +196,8 @@ class GeoGuessr(commands.Cog):
         if daily_config is None:
             return
 
+        logger.info("Sending daily GeoGuessr challenge for %d.", guild.id)
+
         channel = self.bot.get_channel(daily_config["channel"])
         if not channel:
             logger.error("Daily GeoGuessr challenge channel not found.")
@@ -234,38 +237,46 @@ class GeoGuessr(commands.Cog):
         else:
             await channel.send(embed=embed)
 
-    async def send_missing_daily_challenges(self) -> None:
-        """
-        Send the daily GeoGuessr challenges for all guilds that have it set up.
-        """
-        await self.bot.wait_until_ready()
-        await asyncio.sleep(30)  # Wait for everything to be ready
-
-        async with self.config_lock:
-            with CONFIG_PATH.open("r") as f:
-                config = json.load(f)
-
-        date = datetime.datetime.now(tz=tzinfo).strftime("%Y-%m-%d")
-
-        for guild in self.bot.guilds:
-            if (str(guild.id) in config and "daily_links" in config[str(guild.id)]
-                    and "daily_config" in config[str(guild.id)]):
-                if date not in config[str(guild.id)]["daily_links"]:  # Missing challenge
-                    logger.info("Sending missing daily GeoGuessr challenge for guild %d.", guild.id)
-                    await self._send_daily_challenge(guild, send_leaderboard=True)
-
-    @tasks.loop(
-        time=datetime.time(hour=0, minute=0, second=0, tzinfo=tzinfo),
-        reconnect=False,
-    )
     async def daily_challenge_task(self) -> None:
         """
         Task to send the daily GeoGuessr challenge.
         """
         await self.bot.wait_until_ready()
-        logger.info("Sending daily GeoGuessr challenges.")
-        for guild in self.bot.guilds:
-            await self._send_daily_challenge(guild, send_leaderboard=True)
+        logger.info("Starting daily GeoGuessr challenge task.")
+        while True:
+            now = datetime.datetime.now(tz=tzinfo)
+            sleep_seconds = 60 - now.second
+            await asyncio.sleep(sleep_seconds)
+            now = datetime.datetime.now(tz=tzinfo)
+            today = now.strftime("%Y-%m-%d")
+
+            # Check which guilds have the daily challenge set up, and configured to send at this time.
+            async with self.config_lock:
+                with CONFIG_PATH.open("r") as f:
+                    config = json.load(f)
+
+            for guild_id_str, guild_config in config.items():
+                if "daily_config" not in guild_config:
+                    continue
+
+                guild = self.bot.get_guild(int(guild_id_str))
+                if not guild:
+                    logger.info("Guild not found: %s", guild_id_str)
+                    continue
+
+                daily_config = guild_config["daily_config"]
+                total_minute_offset = daily_config.get("total_minute_offset", 0)
+                if total_minute_offset <= now.hour * 60 + now.minute:  # if the time has passed
+                    if "daily_links" in guild_config and today in guild_config["daily_links"]:
+                        continue  # Challenge was already sent today
+
+                    # noinspection PyBroadException
+                    try:
+                        await self._send_daily_challenge(guild, send_leaderboard=True)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        logger.exception("Failed to send daily GeoGuessr challenge for %d.", guild.id)
 
     async def get_daily_config(self, guild_id: int) -> dict[str, typing.Any] | None:
         """
@@ -303,6 +314,7 @@ class GeoGuessr(commands.Cog):
         no_pan: bool = False,
         no_zoom: bool = False,
         ping_role_mention: str | None = None,
+        total_minute_offset: int = 0,
     ) -> None:
         """
         Set the daily config for the specified guild.
@@ -315,6 +327,7 @@ class GeoGuessr(commands.Cog):
         :param no_pan: Whether to forbid panning.
         :param no_zoom: Whether to forbid zooming.
         :param ping_role_mention: The role to ping when the daily challenge is sent.
+        :param total_minute_offset: The total minute offset from midnight.
         """
 
         async with self.config_lock:
@@ -338,10 +351,10 @@ class GeoGuessr(commands.Cog):
                     "no_pan": no_pan,
                     "no_zoom": no_zoom,
                     "ping_role": ping_role_mention,
+                    "total_minute_offset": total_minute_offset,
                 }
 
-                if "daily_links" not in config[str(guild_id)]:  # Do not clear old data
-                    config[str(guild_id)]["daily_links"] = {}
+                config[str(guild_id)]["daily_links"] = {}  # clear old daily links
 
             with CONFIG_PATH.open("w") as f:
                 json.dump(config, f, indent=4)
@@ -731,9 +744,9 @@ class GeoGuessr(commands.Cog):
 
         :param map_name: The name or URL of the map to use. Default: World.
         :param time_limit: The time limit for the challenge in seconds. Default: no time limit.
-        :param allow_move: Whether to allow moving. Default: moving is allowed.
-        :param allow_pan: Whether to allow panning. Default: panning is allowed.
-        :param allow_zoom: Whether to allow zooming. Default: zooming is allowed.
+        :param allow_move: Whether moving should be allowed. Default: moving is allowed.
+        :param allow_pan: Whether panning should be allowed. Default: panning is allowed.
+        :param allow_zoom: Whether zooming should be allowed. Default: zooming is allowed.
         """
         no_move = not allow_move
         no_pan = not allow_pan
@@ -770,7 +783,7 @@ class GeoGuessr(commands.Cog):
     @commands.hybrid_command()
     @app_commands.rename(
         map_name="map", time_limit="time-limit", allow_move="allow-moving",
-        allow_pan="allow-panning", allow_zoom="allow-zooming", ping_role="ping-role"
+        allow_pan="allow-panning", allow_zoom="allow-zooming", ping_role="ping-role", send_time="time"
     )
     @app_commands.autocomplete(map_name=map_name_autocomplete)
     async def setupgeodaily(
@@ -783,6 +796,7 @@ class GeoGuessr(commands.Cog):
         allow_pan: bool = True,
         allow_zoom: bool = True,
         ping_role: discord.Role | None = None,
+        send_time: str = "00:00",  # TODO: Add autocomplete for time
     ) -> None:
         """
         Set up the daily GeoGuessr challenge channel.
@@ -790,10 +804,11 @@ class GeoGuessr(commands.Cog):
         :param channel: The channel to set as the daily GeoGuessr challenge channel.
         :param map_name: The name or URL of the map to use. Default: World.
         :param time_limit: The time limit for the challenge in seconds. Default: 3 minutes.
-        :param allow_move: Whether to allow moving. Default: moving is allowed.
-        :param allow_pan: Whether to allow panning. Default: panning is allowed.
-        :param allow_zoom: Whether to allow zooming. Default: zooming is allowed.
+        :param allow_move: Whether moving should be allowed. Default: moving is allowed.
+        :param allow_pan: Whether panning should be allowed. Default: panning is allowed.
+        :param allow_zoom: Whether zooming should be allowed. Default: zooming is allowed.
         :param ping_role: The role to ping when the daily challenge is sent.
+        :param send_time: The time to send the daily challenge in 24-hour clock. Default: 00:00 (midnight).
         """
         no_move = not allow_move
         no_pan = not allow_pan
@@ -801,6 +816,16 @@ class GeoGuessr(commands.Cog):
 
         if channel is None:
             channel = ctx.channel
+
+        if (time_match := re.match(r"^(\d{1,2}):(\d{1,2})$", send_time)) is None:
+            await ctx.reply("Invalid time format. Please use the 24-hour format `HH:MM`.", ephemeral=True)
+            return
+
+        hour_time = int(time_match.group(1))
+        minute_time = int(time_match.group(2))
+        if not (0 <= hour_time < 24 and 0 <= minute_time < 60):
+            await ctx.reply("Invalid time format. Please use the 24-hour format `HH:MM`.", ephemeral=True)
+        total_minute_offset = hour_time * 60 + minute_time
 
         daily_config = await self.get_daily_config(ctx.guild.id)
         if daily_config is not None:  # Daily challenge already set up
@@ -881,7 +906,7 @@ class GeoGuessr(commands.Cog):
             ping_role_mention = None
 
         await self.set_daily_config(ctx.guild.id, channel.id, slug_name, time_limit,
-                                    no_move, no_pan, no_zoom, ping_role_mention)
+                                    no_move, no_pan, no_zoom, ping_role_mention, total_minute_offset)
 
         await self.get_daily_link(ctx.guild.id, force=True)  # Force generation of a new link
         await self._send_daily_challenge(ctx.guild)
@@ -899,7 +924,7 @@ class GeoGuessr(commands.Cog):
 
         logger.info("Daily GeoGuessr challenge channel set to %d in guild %d.", channel.id, ctx.guild.id)
         await ctx.reply(
-            f"Daily GeoGuessr challenge channel set to {channel.mention}."
+            f"Daily GeoGuessr challenge will be sent to {channel.mention} everyday at `{hour_time:0>2}:{minute_time:0>2}`."
             f"\n\nMap: {map_name}\nTime Limit: {time_limit_text}\n{mpz}",
             allowed_mentions=discord.AllowedMentions.none()
         )
@@ -939,7 +964,7 @@ class GeoGuessr(commands.Cog):
         :return: The list of autocomplete choices.
         """
         current = current.casefold()
-        choices = ["today", "yesterday"]
+        choices = ["today", "yesterday"]  # Don't show if no daily challenges are set up, or today/yesterday are not present
 
         async with self.config_lock:
             with CONFIG_PATH.open("r") as f:
