@@ -640,7 +640,7 @@ class GeoGuessr(commands.Cog):
         :param current: The current input.
         :return: The list of autocomplete choices.
         """
-        current = current.casefold()
+        current = current.strip().casefold()
         possibilities: list[tuple[str, str]] = []
         if not current:
             # World and Famous Places are available on top when no input is given.
