@@ -277,6 +277,7 @@ class GeoGuessr(commands.Cog):
                         raise
                     except Exception:
                         logger.exception("Failed to send daily GeoGuessr challenge for %d.", guild.id)
+                        guild_config["daily_links"][today] = None  # Mark as sent, but no link
 
     async def get_daily_config(self, guild_id: int) -> dict[str, typing.Any] | None:
         """
@@ -687,7 +688,7 @@ class GeoGuessr(commands.Cog):
         :param url: The map URL.
         :return: The parsed slug name. None if invalid.
         """
-        if (slug_name_match := re.search(r"^(?:https?://)?(?:www\.)?geoguessr\.com/maps/([^/]+)",
+        if (slug_name_match := re.search(r"^(?:https?://)?(?:www\.)?geoguessr\.com/maps/([^/\w]+)",
                                          url)) is not None:
             slug_name = slug_name_match.group(1).lower()
             if slug_name == 'community':
@@ -748,6 +749,8 @@ class GeoGuessr(commands.Cog):
         :param allow_pan: Whether panning should be allowed. Default: panning is allowed.
         :param allow_zoom: Whether zooming should be allowed. Default: zooming is allowed.
         """
+        map_name = map_name.strip()
+
         no_move = not allow_move
         no_pan = not allow_pan
         no_zoom = not allow_zoom
@@ -810,6 +813,9 @@ class GeoGuessr(commands.Cog):
         :param ping_role: The role to ping when the daily challenge is sent.
         :param send_time: The time to send the daily challenge in 24-hour clock. Default: 00:00 (midnight).
         """
+        map_name = map_name.strip()
+        send_time = send_time.strip()
+
         no_move = not allow_move
         no_pan = not allow_pan
         no_zoom = not allow_zoom
@@ -991,6 +997,7 @@ class GeoGuessr(commands.Cog):
         """
         await ctx.defer()
 
+        date = date.strip()
         if date.casefold() == "today":
             date = datetime.datetime.now(tz=tzinfo).strftime("%Y-%m-%d")
         elif date.casefold() == "yesterday":
