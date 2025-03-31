@@ -688,7 +688,7 @@ class GeoGuessr(commands.Cog):
         :param url: The map URL.
         :return: The parsed slug name. None if invalid.
         """
-        if (slug_name_match := re.search(r"^(?:https?://)?(?:www\.)?geoguessr\.com/maps/([^/\w]+)",
+        if (slug_name_match := re.search(r"^(?:https?://)?(?:www\.)?geoguessr\.com/maps/([^/\s]+)",
                                          url)) is not None:
             slug_name = slug_name_match.group(1).lower()
             if slug_name == 'community':
