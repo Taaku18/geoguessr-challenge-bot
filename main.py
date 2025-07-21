@@ -233,9 +233,15 @@ class GeoGuessr(commands.Cog):
                     )
 
         if "ping_role" in daily_config and daily_config["ping_role"]:
-            await channel.send(daily_config["ping_role"], embed=embed, allowed_mentions=discord.AllowedMentions.all())
+            sent_message = await channel.send(daily_config["ping_role"],
+                                              embed=embed,
+                                              allowed_mentions=discord.AllowedMentions.all())
         else:
-            await channel.send(embed=embed)
+            sent_message = await channel.send(embed=embed)
+
+        today = datetime.datetime.now(tz=tzinfo).strftime("%B %d, %Y")
+        await sent_message.create_thread(name=f"{today} GeoGuessr Challenge Discussion",
+                                         reason="Daily GeoGuessr Challenge Thread")
 
     async def daily_challenge_task(self) -> None:
         """
